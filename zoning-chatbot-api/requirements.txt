@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+openai
+faiss-cpu
+requests
+tiktoken
+PyPDF2
+python-multipart
