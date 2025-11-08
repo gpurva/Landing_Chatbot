@@ -6,3 +6,4 @@ requests
 tiktoken
 PyPDF2
 python-multipart
+io
