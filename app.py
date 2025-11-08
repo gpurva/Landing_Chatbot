@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 import tiktoken
+from io import BytesIO
 
 # --- CONFIG ---
 OPENAI_API_KEY = "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"
@@ -40,25 +41,33 @@ class QueryOut(BaseModel):
 
 # --- UTIL FUNCTIONS ---
 
-def download_pdf(pdf_url: str, output_path: str):
-    """Download PDF from URL."""
+def extract_text_from_pdf_url(pdf_url: str) -> str:
+    """Fetch and extract text directly from a PDF URL (no saving to disk)."""
     try:
-        r = requests.get(pdf_url)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/118.0 Safari/537.36"
+            ),
+            "Referer": "https://brwinow.e-mapa.net/",
+            "Accept": "application/pdf",
+        }
+        r = requests.get(pdf_url, headers=headers, timeout=30)
         r.raise_for_status()
-        with open(output_path, "wb") as f:
-            f.write(r.content)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to download PDF: {e}")
 
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """Extract text from PDF file."""
-    reader = PdfReader(pdf_path)
-    text = ""
-    for page in reader.pages:
-        t = page.extract_text()
-        if t:
-            text += t + "\n"
-    return text.strip()
+        pdf_file = BytesIO(r.content)
+        reader = PdfReader(pdf_file)
+
+        text = ""
+        for page in reader.pages:
+            t = page.extract_text()
+            if t:
+                text += t + "\n"
+        return text.strip()
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read PDF: {e}")
 
 def chunk_text(text: str, max_tokens: int = 500, overlap: int = 100) -> list[str]:
     """Split text into overlapping chunks based on tokens."""
@@ -98,11 +107,7 @@ async def chat(query: QueryIn):
     start_time = time.time()
 
     # Step 1: Download PDF
-    pdf_path = f"/tmp/{query.planid}.pdf"
-    download_pdf(query.pdfurl, pdf_path)
-
-    # Step 2: Extract text from PDF
-    text = extract_text_from_pdf(pdf_path)
+    text = extract_text_from_pdf_url(query.pdfurl)
     if not text:
         raise HTTPException(status_code=400, detail="No text could be extracted from PDF.")
 
