@@ -31,7 +31,7 @@ app.add_middleware(
 class QueryIn(BaseModel):
     query: str
     planid: str
-    designation: list[str] | None = None
+    gmina: str | None = None
     parcelid: str | None = None
     pdfurl: str
 
@@ -162,3 +162,4 @@ Answer in clear, direct language suitable for a property owner.
     print(f"Processed {query.planid} in {time.time() - start_time:.2f}s")
 
     return {"answer": answer, "planid": query.planid}
+
