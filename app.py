@@ -75,7 +75,7 @@ def load_faiss_and_chunks(base_name: str):
         return INDEX_CACHE[base_name], CHUNKS_CACHE[base_name]
 
     index_filename = f"{base_name}.index"
-    chunks_filename = f"{base_name}_chunks"  # no .json
+    chunks_filename = f"{base_name}_chunks.json"  # no .json
 
     # Download
     index_bytes = download_file_from_github(index_filename)
@@ -169,5 +169,6 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
