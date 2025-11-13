@@ -64,9 +64,12 @@ def download_file_from_github(filename: str) -> bytes:
 
 
 def read_index_from_bytes(index_bytes: bytes):
-    # Create a FAISS IOReader from bytes
-    reader = faiss.IOReader(io.BytesIO(index_bytes))
-    return faiss.read_index(reader)
+    # Write bytes to a temporary file
+    with tempfile.NamedTemporaryFile(suffix=".index") as tmp:
+        tmp.write(index_bytes)
+        tmp.flush()  # ensure all bytes are written
+        index = faiss.read_index(tmp.name)
+    return index
 
 
 def load_faiss_and_chunks(base_name: str):
@@ -169,6 +172,7 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
 
