@@ -17,7 +17,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # Update this to your GitHub repo raw URL
 GITHUB_BASE = "https://raw.githubusercontent.com/gpurva/Landing_Chatbot/main/faiss_indexes"
 
-MANIFEST_URL = f"{GITHUB_BASE}/faiss_manifest.json"
+MANIFEST_URL = f"{GITHUB_BASE}/faiss_manifest"
 
 # --- Load manifest ---
 try:
