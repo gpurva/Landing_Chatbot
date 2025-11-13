@@ -5,6 +5,7 @@ import time
 import faiss
 import numpy as np
 import requests
+import tempfile
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
@@ -172,6 +173,7 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
 
