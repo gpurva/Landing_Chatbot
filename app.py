@@ -10,9 +10,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
 from starlette.middleware.cors import CORSMiddleware
+import httpx
 
 # --- CONFIG ---
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+if not OPENAI_KEY:
+    raise ValueError("OPENAI_API_KEY not set")
+    
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Update this to your GitHub repo raw URL
@@ -173,6 +177,7 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
 
