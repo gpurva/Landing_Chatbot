@@ -12,7 +12,7 @@ from openai import OpenAI
 from starlette.middleware.cors import CORSMiddleware
 
 # --- CONFIG ---
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Update this to your GitHub repo raw URL
@@ -173,6 +173,7 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
 
