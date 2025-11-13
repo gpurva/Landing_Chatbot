@@ -15,7 +15,7 @@ OPENAI_API_KEY = "sk-proj-_LRArJ44GOXY8IBI3QvqycLITgXMNiaCaWEnfoB97uA45G6LyuXIBC
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Update this to your GitHub repo raw URL
-GITHUB_BASE = "https://raw.githubusercontent.com/gpurva/Landing_Chatbot/main/faiss_indexes"
+GITHUB_BASE = "https://raw.githubusercontent.com/gpurva/Landing_Chatbot/refs/heads/main/faiss_indexes/"
 
 MANIFEST_URL = f"{GITHUB_BASE}/faiss_manifest.json"
 
@@ -169,4 +169,5 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
