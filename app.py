@@ -14,7 +14,7 @@ import httpx
 
 # --- CONFIG ---
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_KEY:
+if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY not set")
     
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -177,6 +177,7 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
 
