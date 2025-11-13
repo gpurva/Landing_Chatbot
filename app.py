@@ -64,9 +64,9 @@ def download_file_from_github(filename: str) -> bytes:
 
 
 def read_index_from_bytes(index_bytes: bytes):
-    """Load FAISS index directly from bytes."""
-    index_stream = io.BytesIO(index_bytes)
-    return faiss.read_index(index_stream)
+    # Create a FAISS IOReader from bytes
+    reader = faiss.IOReader(io.BytesIO(index_bytes))
+    return faiss.read_index(reader)
 
 
 def load_faiss_and_chunks(base_name: str):
@@ -169,6 +169,7 @@ async def chat(query: QueryIn):
     print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
     return {"answer": answer}
+
 
 
 
