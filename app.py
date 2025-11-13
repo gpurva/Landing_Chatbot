@@ -1,165 +1,171 @@
 import os
+import io
+import json
 import time
 import faiss
 import numpy as np
 import requests
-from PyPDF2 import PdfReader
-from openai import OpenAI
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from openai import OpenAI
 from starlette.middleware.cors import CORSMiddleware
-import tiktoken
-from io import BytesIO
 
 # --- CONFIG ---
 OPENAI_API_KEY = "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"
 client = OpenAI(api_key=OPENAI_API_KEY)
-encoding = tiktoken.get_encoding("cl100k_base")
 
+# Update this to your GitHub repo raw URL
+GITHUB_BASE = "https://raw.githubusercontent.com/gpurva/Landing_Chatbot/main/faiss_indexes"
+
+MANIFEST_URL = f"{GITHUB_BASE}/faiss_manifest.json"
+
+# --- Load manifest ---
+try:
+    manifest_resp = requests.get(MANIFEST_URL, timeout=20)
+    manifest_resp.raise_for_status()
+    MANIFEST = manifest_resp.json()
+    UZIP_MAP = MANIFEST["uzip_mapping"]
+    GLOBAL_PDFS = MANIFEST.get("global_pdfs", [])
+except Exception as e:
+    raise RuntimeError(f"❌ Failed to load manifest from GitHub: {e}")
+
+# --- Cache ---
+INDEX_CACHE = {}
+CHUNKS_CACHE = {}
+
+# --- FASTAPI APP ---
 app = FastAPI(title="Zoning Plan Chatbot")
 
-# Enable CORS for your Bubble app
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or restrict to your Bubble domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- REQUEST/RESPONSE MODELS ---
+# --- MODELS ---
 class QueryIn(BaseModel):
+    uzip_id: str
     query: str
-    planid: str
-    gmina: str | None = None
-    parcelid: str | None = None
-    pdfurl: str
 
 class QueryOut(BaseModel):
     answer: str
-    planid: str
+
 
 # --- UTIL FUNCTIONS ---
+def download_file_from_github(filename: str) -> bytes:
+    """Download a file from GitHub raw link."""
+    url = f"{GITHUB_BASE}/{filename}"
+    resp = requests.get(url, timeout=30)
+    if not resp.ok:
+        raise HTTPException(status_code=404, detail=f"File not found on GitHub: {filename}")
+    return resp.content
 
-def extract_text_from_pdf_url(pdf_url: str) -> str:
-    """Fetch and extract text directly from a PDF URL (no saving to disk)."""
-    try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/118.0 Safari/537.36"
-            ),
-            "Referer": "https://brwinow.e-mapa.net/",
-            "Accept": "application/pdf",
-        }
-        r = requests.get(pdf_url, headers=headers, timeout=30)
-        r.raise_for_status()
 
-        pdf_file = BytesIO(r.content)
-        reader = PdfReader(pdf_file)
+def read_index_from_bytes(index_bytes: bytes):
+    """Load FAISS index directly from bytes."""
+    index_stream = io.BytesIO(index_bytes)
+    return faiss.read_index(index_stream)
 
-        text = ""
-        for page in reader.pages:
-            t = page.extract_text()
-            if t:
-                text += t + "\n"
-        return text.strip()
 
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read PDF: {e}")
+def load_faiss_and_chunks(base_name: str):
+    """Loads FAISS index + chunks (cached). Handles both '.pdf' and non-pdf names."""
+    if base_name in INDEX_CACHE and base_name in CHUNKS_CACHE:
+        return INDEX_CACHE[base_name], CHUNKS_CACHE[base_name]
 
-def chunk_text(text: str, max_tokens: int = 500, overlap: int = 100) -> list[str]:
-    """Split text into overlapping chunks based on tokens."""
-    tokens = encoding.encode(text)
-    chunks, start = [], 0
-    while start < len(tokens):
-        end = start + max_tokens
-        chunk_tokens = tokens[start:end]
-        chunk_text = encoding.decode(chunk_tokens)
-        chunks.append(chunk_text)
-        start += max_tokens - overlap
-    return chunks
+    index_filename = f"{base_name}.index"
+    chunks_filename = f"{base_name}_chunks"  # no .json
 
-def embed_texts(chunks: list[str], model: str = "text-embedding-3-large") -> np.ndarray:
-    """Create embeddings for text chunks."""
-    vectors = []
-    for i in range(0, len(chunks), 50):
-        batch = chunks[i:i+50]
-        res = client.embeddings.create(model=model, input=batch)
-        vectors.extend([d.embedding for d in res.data])
-    return np.array(vectors, dtype="float32")
+    # Download
+    index_bytes = download_file_from_github(index_filename)
+    chunks_bytes = download_file_from_github(chunks_filename)
+
+    # Parse
+    index = read_index_from_bytes(index_bytes)
+    chunks = json.loads(chunks_bytes.decode("utf-8"))
+
+    INDEX_CACHE[base_name] = index
+    CHUNKS_CACHE[base_name] = chunks
+    return index, chunks
+
 
 def embed_query(text: str, model: str = "text-embedding-3-large") -> np.ndarray:
     res = client.embeddings.create(model=model, input=text)
-    return np.array(res.data[0].embedding, dtype="float32")
+    vec = np.array(res.data[0].embedding, dtype="float32").reshape(1, -1)
+    faiss.normalize_L2(vec)
+    return vec
+
+
+def search_index(index, chunks, query_vec, top_k=5):
+    distances, ids = index.search(query_vec, top_k)
+    return [chunks[i] for i in ids[0] if i < len(chunks)]
+
 
 # --- MAIN ENDPOINT ---
-
 @app.post("/chat", response_model=QueryOut)
 async def chat(query: QueryIn):
     """
-    Accepts query + pdfurl from Bubble, 
-    extracts info from zoning plan PDF, 
-    and returns GPT answer.
+    Accepts uzip_id + query.
+    Loads FAISS + chunks from GitHub for that uzip_id’s PDF (with .pdf suffix),
+    adds building_law + technical_conditions (no .pdf suffix),
+    searches, and returns GPT-generated answer.
     """
-
     start_time = time.time()
+    uzip_id = query.uzip_id.strip()
 
-    # Step 1: Download PDF
-    text = extract_text_from_pdf_url(query.pdfurl)
-    if not text:
-        raise HTTPException(status_code=400, detail="No text could be extracted from PDF.")
+    if uzip_id not in UZIP_MAP:
+        raise HTTPException(status_code=404, detail=f"uzip_id '{uzip_id}' not found in manifest")
 
-    # Step 3: Chunk text
-    chunks = chunk_text(text)
+    pdf_name = UZIP_MAP[uzip_id]  # e.g., "brwinow_A.pdf"
 
-    # Step 4: Embed chunks and create FAISS index
-    embeddings = embed_texts(chunks)
-    faiss.normalize_L2(embeddings)
-    dim = len(embeddings[0])
-    index = faiss.IndexHNSWFlat(dim, 32)
-    index.add(embeddings)
+    try:
+        index_main, chunks_main = load_faiss_and_chunks(pdf_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load FAISS for {pdf_name}: {e}")
 
-    # Step 5: Embed query
-    query_text = query.query
-    if query.designation:
-        query_text += f"\nZoning designations: {', '.join(query.designation)}"
-    query_vec = embed_query(query_text).reshape(1, -1)
-    faiss.normalize_L2(query_vec)
+    # Embed query
+    query_vec = embed_query(query.query)
+    top_main = search_index(index_main, chunks_main, query_vec, top_k=7)
 
-    # Step 6: Search top chunks
-    distances, ids = index.search(query_vec, 10)
-    top_chunks = [chunks[i] for i in ids[0]]
-    context = "\n\n".join(top_chunks)
+    # Add global PDFs
+    global_context = []
+    for gpdf in GLOBAL_PDFS:
+        try:
+            gindex, gchunks = load_faiss_and_chunks(gpdf)
+            gtop = search_index(gindex, gchunks, query_vec, top_k=3)
+            global_context.extend(gtop)
+        except Exception as e:
+            print(f"⚠️ Skipping global file {gpdf}: {e}")
 
-    # Step 7: Generate GPT response
+    # Combine context
+    context = "\n\n".join(top_main + global_context)
+
+    # Compose prompt
     prompt = f"""
-You are an expert zoning plan assistant.
-Use the following zoning plan information and designations to answer clearly and concisely.
+        You are a zoning and building regulation assistant.
+        Use the following context extracted from zoning plan documents and general building laws to answer the question accurately and clearly.
 
-Parcel ID: {query.parcelid}
-Plan ID: {query.planid}
-Zoning designations: {', '.join(query.designation or [])}
+        UZIP ID: {uzip_id}
+        Document: {pdf_name}
 
-CONTEXT:
-{context}
+        Context:
+        {context}
 
-QUESTION:
-{query.query}
+        Question:
+        {query.query}
 
-Answer in clear, direct language suitable for a property owner.
+        Answer concisely and in simple language understandable by a property owner.
     """
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=800,
+        max_tokens=700,
     )
 
     answer = response.choices[0].message.content.strip()
-    print(f"Processed {query.planid} in {time.time() - start_time:.2f}s")
+    print(f"✅ {uzip_id} answered in {time.time() - start_time:.2f}s")
 
-    return {"answer": answer, "planid": query.planid}
-
+    return {"answer": answer}
